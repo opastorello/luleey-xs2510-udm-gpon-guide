@@ -1,0 +1,12 @@
+[Unit]
+Description=XPON stick mgmt keepalive (eth9 192.168.1.2 + :8888 DNAT)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/data/xpon-stick-keepalive.sh
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

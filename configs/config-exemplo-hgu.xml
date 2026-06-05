@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ============================================================================
+     EXEMPLO PARCIAL e ILUSTRATIVO - firmware HGU (Realtek RTL960x / LuLeey).
+     Mostra SO os campos que importam pro modo bridge transparente.
+     NAO e um config completo - troque os <PLACEHOLDERS> pelos SEUS dados.
+
+     A forma mais segura de aplicar: editar o /etc/config/lastgood.xml via telnet
+     com sed (ex: trocar BridgeType de 2 para 0) e reiniciar o stick.
+     ============================================================================ -->
+<DSL_CONF>
+
+  <!-- ====== Identidade GPON (clone da SUA ONT) ====== -->
+  <!-- PLOAM em HEX (cada caractere ASCII em hex). Ex: a string "ABCD" vira "41424344" -->
+  <Value Name="GPON_PLOAM_PASSWD" Value="<SEU_PLOAM_EM_HEX>"/>
+  <Value Name="GPON_PLOAM_FORMAT" Value="1"/>
+  <Value Name="OMCI_FAKE_OK"      Value="1"/>
+  <Value Name="RTK_DEVID_MANUFACTURER"  Value="ZTEG"/>     <!-- vendor da sua ONT -->
+  <Value Name="RTK_DEVID_PRODUCTCLASS"  Value="F6600P"/>   <!-- modelo da sua ONT -->
+  <Value Name="OMCI_SW_VER1" Value="V9.0.10P6N6"/>          <!-- versao SW da sua ONT -->
+  <Value Name="OMCI_SW_VER2" Value="V9.0.10P6N6"/>
+  <!-- ATENCAO: GPON_SN e MACKEY NAO ficam aqui (sao flash vars protegidas).
+       Configure o SN na pagina GPON Settings e o MACKEY (mackey-calc.sh). -->
+
+  <!-- ====== Conexao WAN (ATM_VC_TBL) - bridge transparente ====== -->
+  <Table Name="ATM_VC_TBL">
+    <Value Name="BridgeType"      Value="0"/>   <!-- 0 = transparente (o "fix oculto"!) -->
+    <Value Name="ChannelMode"     Value="0"/>   <!-- 0 = Bridged -->
+    <Value Name="NAPT"            Value="0"/>
+    <Value Name="vlan"            Value="1"/>
+    <Value Name="vid"             Value="<SUA_VLAN>"/>   <!-- a VLAN REAL do provedor (ex: 3471) -->
+    <Value Name="vprio"           Value="1"/>
+    <Value Name="itfGroup"        Value="1"/>   <!-- LAN_1 -->
+    <Value Name="applicationtype" Value="2"/>   <!-- 2 = INTERNET -->
+    <Value Name="MacAddr"         Value="<SEU_MAC_SEM_SEPARADOR>"/>
+    <Value Name="omci_configured" Value="0"/>
+  </Table>
+
+</DSL_CONF>
