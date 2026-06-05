@@ -82,6 +82,8 @@ A UDM (testado em Pro Max) **não faz offload de hardware no PPPoE** → o tráf
 ethtool -k <wan> | grep hw-tc-offload   # -> off [fixed]
 grep -c OFFLOAD /proc/net/nf_conntrack  # -> 0
 ```
+Dá pra **ver ao vivo**: `mpstat -P ALL 1` durante um speedtest mostra a **softirq saturar** (cores a 65–78% de `%soft`, idle <10%) — é a CPU processando o PPPoE em software (e cada bit custa o **dobro**: entra na WAN + sai encaminhado na LAN).
+
 **Não é o stick** (a ONT em bridge dá o mesmo teto). Pra **giga cheio**: peça **IPoE/DHCP** ao provedor (a UDM roteia em HW), ou deixe um roteador externo fazer o PPPoE.
 
 ## Passo a passo
