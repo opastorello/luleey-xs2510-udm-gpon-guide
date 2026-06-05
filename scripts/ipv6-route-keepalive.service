@@ -1,0 +1,12 @@
+[Unit]
+Description=IPv6 default route keepalive (PPPoE WAN)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/data/ipv6-route-keepalive.sh
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

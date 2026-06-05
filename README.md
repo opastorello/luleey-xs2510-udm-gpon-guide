@@ -18,6 +18,7 @@ Manual de **auto-ajuda da comunidade** pra usar um **stick SFP+ XPON LuLeey LL-X
 - [Acesso e gerência do stick](#acesso-e-gerência-do-stick)
 - [Instalação dos scripts (permanente)](#instalação-dos-scripts-permanente)
 - [Velocidade: o teto de PPPoE da UDM](#velocidade-o-teto-de-pppoe-da-udm)
+- [IPv6 em PPPoE na UDM](#ipv6-em-pppoe-na-udm)
 - [Troubleshooting e recuperação](#troubleshooting-e-recuperação)
 - [FAQ](#faq)
 - [Scripts](#scripts)
@@ -144,6 +145,27 @@ Já está no [aprendizado #4](#4-a-udm-trava-o-pppoe-em-770-mbps-num-link-de-1-g
 2. 🥈 Um **roteador externo** fazendo o PPPoE (a UDM atrás por DHCP).
 3. 🥉 Aceitar ~770 com a UDM no PPPoE.
 
+## IPv6 em PPPoE na UDM
+Se seu provedor entrega **IPv6 por PPPoE**, prepare-se pra esse buraco: a UniFi pega o prefixo (DHCPv6-PD) e configura as LANs (RA), **mas NÃO instala a rota default IPv6 na WAN PPPoE** → o IPv6 não navega e a aba Internet não mostra nada.
+
+**Causa exata:** num roteador (`net.ipv6.conf.all.forwarding=1`), o kernel só aceita a rota default vinda da RA com **`accept_ra=2`** — e a UniFi deixa **`accept_ra=1`** na `ppp0`. (Em **IPoE** é nativo; o buraco é só no PPPoE.)
+
+**Confirme que o provedor entrega IPv6** (sonda na WAN):
+```sh
+rdisc6 -1 ppp0       # deve voltar uma RA com prefixo + router lifetime
+odhcp6c -P 56 ppp0   # deve fazer Solicit -> Advertise -> Request -> Reply (a PD)
+```
+
+**Fix (curativo):** keepalive que põe `accept_ra=2` + instala a rota via o peer (BRAS) da `ppp0`:
+```sh
+GW=$(ip -6 addr show dev ppp0 | grep -oE "fe80::[0-9a-f:]+" | head -2 | tail -1)
+sysctl -w net.ipv6.conf.ppp0.accept_ra=2
+ip -6 route replace default via "$GW" dev ppp0 metric 100
+```
+Permanente: [`scripts/ipv6-route-keepalive.sh`](scripts/ipv6-route-keepalive.sh) + `.service` + [`scripts/on_boot.d-20-ipv6-route.sh`](scripts/on_boot.d-20-ipv6-route.sh) (mesmo padrão de instalação dos outros keepalives). Teste: [test-ipv6.com](https://test-ipv6.com) → 10/10.
+
+⚠️ **Multi-WAN:** uma 2ª WAN com IPv6 (SLAAC) compete — desabilite o IPv6 dela. E lembre: **é curativo** — o fix limpo é **IPoE** (aí o IPv6 é nativo na UniFi e você remove o keepalive).
+
 ## Troubleshooting e recuperação
 | Sintoma | Causa provável / fix |
 |---|---|
@@ -172,6 +194,9 @@ Já está no [aprendizado #4](#4-a-udm-trava-o-pppoe-em-770-mbps-num-link-de-1-g
 | [`scripts/xpon-stick-keepalive.sh`](scripts/xpon-stick-keepalive.sh) | Mantém o `:8888` **sempre no ar** (re-aplica a rota a cada 30s) |
 | [`scripts/xpon-stick-keepalive.service`](scripts/xpon-stick-keepalive.service) | Unit systemd (referência — o `on_boot.d` já cria ela inline) |
 | [`scripts/on_boot.d-10-xpon-stick.sh`](scripts/on_boot.d-10-xpon-stick.sh) | Vai em `/data/on_boot.d/10-xpon-stick.sh` — cria/ativa o keepalive no boot |
+| [`scripts/ipv6-route-keepalive.sh`](scripts/ipv6-route-keepalive.sh) | **(IPv6/PPPoE)** instala a rota default IPv6 que a UniFi não instala — ver [IPv6 em PPPoE](#ipv6-em-pppoe-na-udm) |
+| [`scripts/ipv6-route-keepalive.service`](scripts/ipv6-route-keepalive.service) | Unit systemd do keepalive de IPv6 (`Restart=always`) |
+| [`scripts/on_boot.d-20-ipv6-route.sh`](scripts/on_boot.d-20-ipv6-route.sh) | Vai em `/data/on_boot.d/20-ipv6-route.sh` — re-cria o keepalive de IPv6 no boot |
 
 > Os scripts usam `eth9` (SFP+ no UDM Pro Max) e `br0` (LAN) — descubra os seus com `ip -br link` / `ip -br addr` e **ajuste** se diferente. Instalação na seção [Instalação dos scripts](#instalação-dos-scripts-permanente).
 
