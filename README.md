@@ -8,6 +8,32 @@ Manual de **auto-ajuda da comunidade** pra usar um **stick SFP+ XPON LuLeey LL-X
 
 ---
 
+## 📌 TL;DR
+- ✅ **Funciona:** o stick clona a identidade GPON da sua ONT → registra **O5** no OLT → a UDM faz o PPPoE → IP. Troca a caixa da ONT por um SFP no slot.
+- 🔑 **Use o firmware HGU** — o SFU tem um **bug de VLAN** (não desmarca a descida).
+- 🔁 **Dual-bank:** troca de firmware **sem reflashar** (`nv setenv sw_tryactive`/`sw_commit`).
+- 🐌 **Velocidade:** a UDM **não faz offload de PPPoE** → teto ~**770 Mbps** (a softirq da CPU satura). Pra giga cheio: **IPoE**.
+- 🌐 **IPv6:** o provedor entrega, mas a UDM **não instala a rota default IPv6 no PPPoE** — precisa de um curativo (ou **IPoE**, que é nativo).
+
+## 🗺️ Arquitetura
+```
+Internet (seu provedor GPON)
+        │
+   OLT do provedor              VLAN de transporte: <SUA_VLAN> (confirme via OMCI)
+        │  fibra GPON (SC/APC)
+        │
+  Stick LuLeey LL-XS2510  (clona a SUA ONT)
+   SN · MAC · PLOAM · MACKEY da sua ONT · Firmware HGU · Estado O5
+   Bridge transparente: VLAN (OLT)  <->  untagged (UDM)
+        │  SFP+ da UDM (ex: eth9), 1 Gbps
+        │
+  UniFi UDM  —  faz o PPPoE (ppp0) → IP público
+        │
+   sua LAN
+```
+
+---
+
 ## 📑 Índice
 - [Pra quem é](#pra-quem-é)
 - [O que você precisa](#o-que-você-precisa)
@@ -183,7 +209,8 @@ Permanente: [`scripts/ipv6-route-keepalive.sh`](scripts/ipv6-route-keepalive.sh)
 - **Funciona em UDM normal / UXG / outro roteador?** Onde tiver como plugar o SFP e fazer PPPoE, sim. O teto de ~770 vale onde a **UDM** termina o PPPoE.
 - **Preciso baixar o firmware HGU?** Quase sempre **não** — ele costuma já estar no outro banco (dual-bank).
 - **Serve pra outro stick RTL960x?** O método é o mesmo (RTL9601/9603): a fórmula do MACKEY e os comandos `nv`/`omcicli` valem. As versões de firmware mudam.
-- **Vou ter o giga cheio?** Com a UDM no PPPoE, não (~770). Com **IPoE** do provedor, sim.
+- **Vou ter o giga cheio?** Com a UDM no PPPoE, não (~770 — a softirq da CPU satura). Com **IPoE** do provedor, sim.
+- **E o IPv6?** O provedor entrega, mas a UDM **não instala a rota default IPv6 no PPPoE** — precisa do keepalive (ver [IPv6 em PPPoE na UDM](#ipv6-em-pppoe-na-udm)). Com **IPoE** é nativo.
 - **Posso clonar qualquer ONT?** O guia cobre clonar a **sua** (ZTE F6600P no caso). Outros modelos: ajuste Vendor ID/Product Class/versões pros da sua ONT.
 
 ## Scripts
