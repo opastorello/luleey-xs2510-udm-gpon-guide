@@ -11,10 +11,12 @@ Manual de **auto-ajuda da comunidade** pra usar um **stick SFP+ XPON LuLeey LL-X
 ## 📑 Índice
 - [Pra quem é](#pra-quem-é)
 - [O que você precisa](#o-que-você-precisa)
+- [Pré-requisitos na UDM](#pré-requisitos-na-udm)
 - [Conceitos rápidos](#conceitos-rápidos)
 - [Os 4 aprendizados-ouro](#os-4-aprendizados-ouro)
 - [Passo a passo](#passo-a-passo)
 - [Acesso e gerência do stick](#acesso-e-gerência-do-stick)
+- [Instalação dos scripts (permanente)](#instalação-dos-scripts-permanente)
 - [Velocidade: o teto de PPPoE da UDM](#velocidade-o-teto-de-pppoe-da-udm)
 - [Troubleshooting e recuperação](#troubleshooting-e-recuperação)
 - [FAQ](#faq)
@@ -35,6 +37,17 @@ Manual de **auto-ajuda da comunidade** pra usar um **stick SFP+ XPON LuLeey LL-X
 | Roteador | **UDM com SFP+** (Pro / Pro Max / SE) — ou outro que faça PPPoE |
 | Dados da sua ONT | **GPON SN**, **MAC**, **PLOAM password**, **usuário/senha PPPoE**, e a **VLAN** de serviço |
 | Acesso | À web da ONT atual (pra ler os dados) ou a etiqueta + suporte do provedor |
+
+## Pré-requisitos na UDM
+Antes de começar, prepare a UDM:
+1. **Habilite o SSH:** UniFi OS → **Console Settings → SSH** → ligue e defina a senha **root**. (É essa a senha de `ssh root@<IP-DA-UDM>` — **não** é a do "Device SSH Authentication" do app Network.)
+2. **Instale o on-boot-script** (pros scripts persistirem no boot): [unifios-utilities / on-boot-script](https://github.com/unifi-utilities/unifios-utilities/tree/main/on-boot-script). Sem ele, `/data/on_boot.d/` não roda no boot (e a persistência some num update do UniFi OS).
+3. **Descubra suas interfaces** — os scripts usam `eth9` (SFP+ no Pro Max) e `br0` (LAN); no seu modelo pode mudar:
+   ```sh
+   ip -br link     # ache a interface do SFP+ (onde o stick está plugado)
+   ip -br addr     # veja qual é a bridge da LAN (geralmente br0)
+   ```
+   Ajuste `eth9`/`br0` nos scripts pro que encontrar.
 
 ## Conceitos rápidos
 - **ONU states O0–O5:** O1 = procurando sinal, **O5 = registrado e operando**. O alvo é sempre **O5**.
@@ -75,7 +88,7 @@ grep -c OFFLOAD /proc/net/nf_conntrack  # -> 0
 
 1. **Colete os dados da sua ONT atual** (web da ONT): GPON SN, MAC, PLOAM, usuário/senha PPPoE, e a VLAN de serviço.
 2. **Garanta o firmware HGU** no stick (troque de banco se vier no SFU — seção acima).
-3. **Acesse o stick.** Plugue na UDM; rode [`scripts/udm-stick-route.sh`](scripts/udm-stick-route.sh) na UDM (root via SSH) e abra `http://<IP-DA-SUA-UDM>:8888` (login `admin`/`admin`).
+3. **Acesse o stick.** Plugue o stick no SFP+ da UDM. Via SSH (`ssh root@<IP-DA-UDM>`), rode [`scripts/udm-stick-route.sh`](scripts/udm-stick-route.sh) (ajuste a interface se não for `eth9`) e abra `http://<IP-DA-UDM>:8888` (login `admin`/`admin`). Se não abrir, confirme que o stick responde: `ping 192.168.1.1` da UDM — alguns sticks vêm noutro IP.
 4. **GPON Settings:** preencha **SN**, **PLOAM**, **Vendor ID** (ex.: `ZTEG`), **Product Class** (ex.: `F6600P`), as **versões de SW/HW** e o **MACKEY** (calcule: `scripts/mackey-calc.sh <SEU_MAC>`).
 5. **Conexão WAN (modo bridge):**
    - `ChannelMode = Bridge` (0)
@@ -83,18 +96,45 @@ grep -c OFFLOAD /proc/net/nf_conntrack  # -> 0
    - `NAPT = 0`
    - **`vid = <SUA_VLAN>`** (a VLAN **real** do provedor)
    - mapeada na LAN/porta certa, `applicationtype = 2` (INTERNET)
-   - Jeito mais robusto: editar `/etc/config/lastgood.xml` via telnet (`sed`) — veja [`configs/config-exemplo-hgu.xml`](configs/config-exemplo-hgu.xml).
+   - Jeito mais robusto: editar `/etc/config/lastgood.xml` via telnet (`sed`) — veja [`configs/config-exemplo-hgu.xml`](configs/config-exemplo-hgu.xml). **Exemplo** (faça backup antes, reinicie depois):
+     ```sh
+     cp /etc/config/lastgood.xml /etc/config/lastgood.xml.bak
+     sed -i 's/Name="BridgeType" Value="2"/Name="BridgeType" Value="0"/' /etc/config/lastgood.xml
+     sed -i 's/Name="vid" Value="[0-9]*"/Name="vid" Value="<SUA_VLAN>"/'   /etc/config/lastgood.xml
+     reboot
+     ```
 6. **Na UDM:** configure a WAN como **PPPoE untagged** (sem VLAN — quem faz a VLAN é o stick), usuário/senha do provedor, na porta do SFP+.
 7. **Plugue a fibra no stick.** Acompanhe `diag gpon get onu-state` (telnet do stick) até **O5**. A UDM disca o PPPoE sozinha → IP público. 🎉
-8. **Acesso permanente:** instale o keepalive ([`scripts/`](scripts/)) pra a web do stick (`:8888`) ficar **sempre no ar**.
+8. **Acesso permanente:** deixe a web do stick (`:8888`) **sempre no ar** — comandos prontos em [Instalação dos scripts](#instalação-dos-scripts-permanente).
+9. **Deu certo?** Na UDM: `ip -4 -br addr | grep ppp` mostra **IP público** e `ping -c2 8.8.8.8` responde. Rode um speedtest. Se ficar offline, veja o **rollback** no [Troubleshooting](#troubleshooting-e-recuperação).
 
 ## Acesso e gerência do stick
 O stick fica numa rede isolada (geralmente **`192.168.1.1`**). Pra alcançar a web dele pela LAN, a UDM faz um **DNAT** `:8888 → 192.168.1.1:80`.
 - **Rota one-shot:** [`scripts/udm-stick-route.sh`](scripts/udm-stick-route.sh).
-- **Permanente** (sobrevive a reprovisionamento, que limpa o iptables): [`scripts/xpon-stick-keepalive.sh`](scripts/xpon-stick-keepalive.sh) + [`scripts/xpon-stick-keepalive.service`](scripts/xpon-stick-keepalive.service) + [`scripts/on_boot.d-10-xpon-stick.sh`](scripts/on_boot.d-10-xpon-stick.sh).
+- **Permanente** (sobrevive a reprovisionamento, que limpa o iptables): ver [Instalação dos scripts](#instalação-dos-scripts-permanente).
 - **Web:** `http://<IP-DA-UDM>:8888` (login `admin`/`admin`).
 - **Telnet:** `busybox telnet 192.168.1.1` (precisa **TTY interativo**; pipes simples fecham). Logins comuns (root): `admin/admin`, `user/user`, e o **backdoor conhecido dos LuLeey** `administrator/Stel$864` (documentado nos fóruns).
+- 🔒 **Endureça:** troque o `admin/admin` do stick (web → Admin → Password) e, idealmente, restrinja o `:8888` a um IP de gerência (no DNAT, troque `-i br0` por `-s <SEU_IP>/32`).
 - ⚠️ O DNAT é só pra **clientes da LAN** — um `curl` da própria UDM dá HTTP 000 (falso negativo).
+
+## Instalação dos scripts (permanente)
+Pra o acesso ao stick (`:8888`) sobreviver a reboots **e** reprovisionamentos. Requer os [Pré-requisitos na UDM](#pré-requisitos-na-udm) (SSH + on-boot-script).
+
+```sh
+# 1) (na UDM) garanta a pasta on_boot.d
+mkdir -p /data/on_boot.d
+
+# 2) (do seu PC) copie os 2 scripts pra UDM:
+scp scripts/xpon-stick-keepalive.sh      root@<IP-DA-UDM>:/data/
+scp scripts/on_boot.d-10-xpon-stick.sh   root@<IP-DA-UDM>:/data/on_boot.d/10-xpon-stick.sh
+
+# 3) (na UDM, via ssh) permissões + ativar:
+chmod +x /data/xpon-stick-keepalive.sh /data/on_boot.d/10-xpon-stick.sh
+sh /data/on_boot.d/10-xpon-stick.sh                 # cria + ativa o service systemd
+systemctl is-active xpon-stick-keepalive.service    # -> active
+```
+> 💡 O `on_boot.d-10-xpon-stick.sh` **já cria a unit systemd inline** e a ativa. Por isso você **não precisa** instalar o `xpon-stick-keepalive.service` à parte — ele está no repo só como referência do conteúdo da unit (uma fonte da verdade só).
+> Note o **rename** no passo 2: o arquivo vai pra `/data/on_boot.d/` como `10-xpon-stick.sh` (o prefixo `on_boot.d-` é só o nome no repo).
 
 ## Velocidade: o teto de PPPoE da UDM
 Já está no [aprendizado #4](#4-a-udm-trava-o-pppoe-em-770-mbps-num-link-de-1-giga): a UDM não faz offload de PPPoE → ~770 Mbps. **Soluções, em ordem:**
@@ -110,6 +150,9 @@ Já está no [aprendizado #4](#4-a-udm-trava-o-pppoe-em-770-mbps-num-link-de-1-g
 | VLAN errada | Leia a real na ONT: `omcicli mib get 84` / `171`. Não confie só no suporte |
 | Stick travado | SFP+ **não tem PoE**; **reinicie a UDM** pra cortar a energia do cage e resetar o stick. Ou puxe o SFP |
 | Firmware travou no boot | O **watchdog** do dual-bank volta sozinho pro outro banco |
+| `:8888` não abre | Confira a rota (`ip -br addr` mostra `192.168.1.2` na interface do SFP+) e o `ping 192.168.1.1`. Lembre: `curl` da própria UDM sempre dá HTTP 000 |
+| Como sei que funcionou? | `ip -4 -br addr \| grep ppp` mostra IP público + `ping -c2 8.8.8.8` ok → rode um speedtest |
+| 🔙 **Rollback** (fiquei offline) | Religue a fibra na **ONT original** e aponte a WAN da UDM de volta pra porta dela (mesmo user/senha PPPoE). Volta na hora — depois retoma os testes com calma |
 | Quero zerar | **Fiber-reset:** desplugar/replugar a fibra 5–6x em 30s reseta a config (menos loid/ploam). ⚠️ Apaga o resto — só em emergência |
 
 ## FAQ
@@ -125,14 +168,15 @@ Já está no [aprendizado #4](#4-a-udm-trava-o-pppoe-em-770-mbps-num-link-de-1-g
 | [`scripts/mackey-calc.sh`](scripts/mackey-calc.sh) | Calcula o **MACKEY** a partir do MAC (`MD5("hsgq1.9a"+MAC)`) |
 | [`scripts/udm-stick-route.sh`](scripts/udm-stick-route.sh) | Rota **one-shot** pra acessar a web do stick (`:8888`) |
 | [`scripts/xpon-stick-keepalive.sh`](scripts/xpon-stick-keepalive.sh) | Mantém o `:8888` **sempre no ar** (re-aplica a rota a cada 30s) |
-| [`scripts/xpon-stick-keepalive.service`](scripts/xpon-stick-keepalive.service) | Unit systemd do keepalive (`Restart=always`) |
-| [`scripts/on_boot.d-10-xpon-stick.sh`](scripts/on_boot.d-10-xpon-stick.sh) | Vai em `/data/on_boot.d/` — re-cria o keepalive no boot (sobrevive a updates do UniFi OS) |
+| [`scripts/xpon-stick-keepalive.service`](scripts/xpon-stick-keepalive.service) | Unit systemd (referência — o `on_boot.d` já cria ela inline) |
+| [`scripts/on_boot.d-10-xpon-stick.sh`](scripts/on_boot.d-10-xpon-stick.sh) | Vai em `/data/on_boot.d/10-xpon-stick.sh` — cria/ativa o keepalive no boot |
 
-> Os scripts usam `eth9` (SFP+ no UDM Pro Max) e `br0` (LAN) — **ajuste pra sua interface/modelo** se diferente.
+> Os scripts usam `eth9` (SFP+ no UDM Pro Max) e `br0` (LAN) — descubra os seus com `ip -br link` / `ip -br addr` e **ajuste** se diferente. Instalação na seção [Instalação dos scripts](#instalação-dos-scripts-permanente).
 
 ## Referências
 - [LuLeey LL-XS2510 (produto)](https://www.luleey.com/product/2-5g-xpon-stick-sfp-onu/) · [How To Switch The Software Version](https://www.luleey.com/how-to-switch-the-software-versionll-xs2510/)
 - [Anime4000/RTL960x — engenharia reversa do chip](https://github.com/Anime4000/RTL960x) · [Issues do LL-XS2510](https://github.com/Anime4000/RTL960x/issues)
+- [unifios-utilities — on-boot-script (persistência na UDM)](https://github.com/unifi-utilities/unifios-utilities/tree/main/on-boot-script)
 - [pon.wiki — custom firmware em PON sticks](https://pon.wiki)
 - Fóruns Ubiquiti/PON (busque "LuLeey RTL960x backdoor", "GPON SFP UDM")
 
