@@ -12,7 +12,7 @@ Manual de **auto-ajuda da comunidade** pra usar um **stick SFP+ XPON LuLeey LL-X
 - ✅ **Funciona:** o stick clona a identidade GPON da sua ONT → registra **O5** no OLT → a UDM faz o PPPoE → IP. Troca a caixa da ONT por um SFP no slot.
 - 🔑 **Use o firmware HGU** — o SFU tem um **bug de VLAN** (não desmarca a descida).
 - 🔁 **Dual-bank:** troca de firmware **sem reflashar** (`nv setenv sw_tryactive`/`sw_commit`).
-- 🚀 **Velocidade:** se o download trava em ~**770-850 Mbps** num link de 1 Giga, o culpado quase sempre é o **DPI / "Traffic Identification"** da UniFi (não o PPPoE!). **Desligue o DPI + regras de QoS que casam apps → a UDM crava ~940 Mbps.** Detalhe no [aprendizado #4](#4-o-teto-de-770-mbps-geralmente-é-o-dpi-da-unifi).
+- 🚀 **Velocidade:** se o download trava em ~**770-850 Mbps** num link de 1 Giga, o culpado quase sempre é uma **regra de QoS que prioriza apps** (DPI), não o PPPoE! **Remova essa regra → a UDM crava ~940 Mbps** (Identification e IPS podem ficar ligados). Detalhe no [aprendizado #4](#os-4-aprendizados-ouro).
 - 🌐 **IPv6:** o provedor entrega, mas a UDM **não instala a rota default IPv6 no PPPoE** — precisa de um curativo (ou **IPoE**, que é nativo).
 
 ## 🗺️ Arquitetura
@@ -103,17 +103,18 @@ Muitas vezes o HGU **já está no outro banco** — você nem precisa de arquivo
 ### 3. SN e MACKEY são **protegidos**
 Sobrevivem a "reset all parameters", restore de config e flash de firmware (ficam em flash vars separadas). O backup `config.xml` **NÃO** os contém — não conte com ele pra restaurar SN/MACKEY.
 
-### 4. O teto de ~770 Mbps geralmente é o **DPI** da UniFi
-Se o download trava em ~770-850 Mbps num link de 1 Giga, o suspeito nº1 **não é o PPPoE** — é o **DPI / "Traffic Identification"** (e regras de **QoS que casam aplicativos**, que também acionam o DPI por baixo). O DPI inspeciona **cada pacote** → infla o custo de CPU por pacote → a **softirq do core de recepção satura**.
+### 4. O teto de ~770 Mbps geralmente é uma **regra de QoS de apps**, não o PPPoE
+Se o download trava em ~770-850 Mbps num link de 1 Giga, o suspeito nº1 **não é o PPPoE** — é uma **regra de QoS que prioriza aplicativos** (ex.: "Critical Apps Prioritization"). Ela casa apps via **DPI** (`--cat-app` → módulo `xt_dpi` no forwarding) e inspeciona **cada pacote** → infla o custo de CPU por pacote → a **softirq do core de recepção satura**.
 
-Confirma ao vivo: `mpstat -P ALL 1` durante um speedtest mostra um core a ~74% de `%soft`. Com o DPI **ligado** o idle agregado fica ~22%; **desligado**, salta pra ~45% e a velocidade pula de ~850 → **~940**.
+Confirma ao vivo: `mpstat -P ALL 1` durante um speedtest. Com a regra de QoS **ligada** o core de recepção vai a ~**85%** `%soft` e o idle agregado cai pra ~28% (velocidade ~850); **removida**, o core cai pra ~36%, idle sobe pra ~45% e a velocidade pula pra **~940**. Reprodutível ida-e-volta.
 
 **Como resolver:**
-1. `Settings → Traffic Identification` (ou "Deep Packet Inspection" / "Application Visibility") → **OFF**.
-2. **Remova/desabilite regras de QoS que priorizam aplicativos** (ex.: "Critical Apps Prioritization") — elas reativam o DPI por baixo, mesmo com o item 1 desligado.
-3. Valide via SSH: `iptables-save | grep -c dpi` deve dar **0** e `lsmod | grep xt_dpi` deve ter **0 refs**.
-4. Re-teste. Custo: você perde só os **gráficos de "quais apps usam a banda"**. Reversível.
+1. **Remova/desabilite a regra de QoS que casa aplicativos** (`Settings → ... → QoS`, objetivo "Prioritize" com apps). **É o único passo que importa pra velocidade.**
+2. Valide via SSH: `iptables-save | grep -c dpi` deve dar **0** e `lsmod | grep xt_dpi` deve ter **0 refs**.
+3. Re-teste. Custo: você perde só a **priorização de apps sob congestão** (num link de 1G quase nunca atua). Reversível.
 
+> ✅ **NÃO precisa sacrificar segurança/visibilidade** (testado num UDM Pro Max, A/B/A): o **"Identification: Device & Traffic"** e o **IPS** (até em "Notify and Block") são **inocentes** — podem ficar **ligados** sem perder banda. Nessa UDM o IPS roda em **PCAP passivo** (não inline/NFQUEUE), então o "block" é reativo e **não dá hard-cap**.
+>
 > ⚠️ **Pistas falsas comuns:** (a) `grep -c OFFLOAD /proc/net/nf_conntrack` dá **0** mesmo com tudo OK — nesse chip (Annapurna AL324) a tag de offload **não aparece**, então não prova nada. (b) O speedtest **interno da UDM** (1× softirq) não reflete um **device encaminhado** (2× softirq: entra na WAN + sai na LAN) — um cliente real fica um pouco abaixo do teste interno; use boa NIC e evite switches antigos no caminho.
 
 ## Passo a passo
@@ -169,7 +170,7 @@ systemctl is-active xpon-stick-keepalive.service    # -> active
 > Note o **rename** no passo 2: o arquivo vai pra `/data/on_boot.d/` como `10-xpon-stick.sh` (o prefixo `on_boot.d-` é só o nome no repo).
 
 ## Velocidade: o teto de ~770 e como destravar
-Veja o [aprendizado #4](#4-o-teto-de-770-mbps-geralmente-é-o-dpi-da-unifi): na grande maioria dos casos o teto de ~770-850 é o **DPI** da UniFi, não o PPPoE. **Em ordem:**
+Veja o [aprendizado #4](#os-4-aprendizados-ouro): na grande maioria dos casos o teto de ~770-850 é uma **regra de QoS de apps** (DPI), não o PPPoE. **Em ordem:**
 1. 🥇 **Desligar o DPI** ("Traffic Identification") **+ remover regras de QoS que casam apps** → costuma cravar **~940** na própria UDM, sem mexer em mais nada. *(Comece por aqui — é grátis e reversível.)*
 2. 🥈 Se ainda faltar banda nos **devices** (não no teste interno), lembre do **2× softirq** do tráfego encaminhado: use boa NIC e evite switches antigos no caminho.
 3. 🥉 **IPoE/DHCP** do provedor — hoje vale mais pelo **IPv6 nativo** + IP público direto do que pela banda (a banda o DPI-off já resolve).
@@ -212,7 +213,7 @@ Permanente: [`scripts/ipv6-route-keepalive.sh`](scripts/ipv6-route-keepalive.sh)
 - **Funciona em UDM normal / UXG / outro roteador?** Onde tiver como plugar o SFP e fazer PPPoE, sim. E o teto de ~770 por DPI (aprendizado #4) vale pra qualquer gateway UniFi.
 - **Preciso baixar o firmware HGU?** Quase sempre **não** — ele costuma já estar no outro banco (dual-bank).
 - **Serve pra outro stick RTL960x?** O método é o mesmo (RTL9601/9603): a fórmula do MACKEY e os comandos `nv`/`omcicli` valem. As versões de firmware mudam.
-- **Vou ter o giga cheio?** Sim, na própria UDM com PPPoE — **desde que você desligue o DPI/"Traffic Identification"** (ver aprendizado #4). Com DPI ligado trava em ~770-850; desligado crava ~940. Nos **devices** da LAN, conte com um pouco menos (custo 2× do tráfego encaminhado).
+- **Vou ter o giga cheio?** Sim, na própria UDM com PPPoE — **desde que você remova a regra de QoS que prioriza apps** (ver aprendizado #4). Com ela trava em ~770-850; sem ela crava ~940. Identification e IPS podem ficar ligados. Nos **devices** da LAN, conte com um pouco menos (custo 2× do tráfego encaminhado).
 - **E o IPv6?** O provedor entrega, mas a UDM **não instala a rota default IPv6 no PPPoE** — precisa do keepalive (ver [IPv6 em PPPoE na UDM](#ipv6-em-pppoe-na-udm)). Com **IPoE** é nativo.
 - **Posso clonar qualquer ONT?** O guia cobre clonar a **sua** (ZTE F6600P no caso). Outros modelos: ajuste Vendor ID/Product Class/versões pros da sua ONT.
 
