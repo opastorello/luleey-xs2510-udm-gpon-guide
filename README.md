@@ -147,8 +147,9 @@ O stick fica numa rede isolada (geralmente **`192.168.1.1`**). Pra alcançar a w
 - **Permanente** (sobrevive a reprovisionamento, que limpa o iptables): ver [Instalação dos scripts](#instalação-dos-scripts-permanente).
 - **Web:** `http://<IP-DA-UDM>:8888` (login `admin`/`admin`).
 - **Telnet:** `busybox telnet 192.168.1.1` (precisa **TTY interativo**; pipes simples fecham). Logins comuns (root): `admin/admin`, `user/user`, e o **backdoor conhecido dos LuLeey** `administrator/Stel$864` (documentado nos fóruns).
-- 🔒 **Endureça:** troque o `admin/admin` do stick (web → Admin → Password) e, idealmente, restrinja o `:8888` a um IP de gerência (no DNAT, troque `-i br0` por `-s <SEU_IP>/32`).
-- ⚠️ O DNAT é só pra **clientes da LAN** — um `curl` da própria UDM dá HTTP 000 (falso negativo).
+- 🔒 **Endureça:** troque o `admin/admin` do stick (web → Admin → Password) e ajuste o **`LAN_IP`/`LAN_NET`** no topo dos scripts pra sua rede.
+- ⚠️🔥 **NUNCA use a regra `-i br0 --dport 8888 -j DNAT` SEM `-d` (filtro de destino).** Sem o `-d`, ela casa **qualquer conexão da LAN para a porta 8888 — a qualquer IP do mundo** — e sequestra (hairpin) tudo pro web admin do stick (`admin/admin`). Os scripts deste guia agora travam **origem LAN → destino o IP da sua UDM** (`-s "$LAN_NET" -d "$LAN_IP"`) e só instalam a regra **se o stick responder ping** (removem sozinhos se ele sumir).
+- ⚠️ O DNAT é só pra **clientes da LAN** — um `curl` da própria UDM dá HTTP 000 (falso negativo, não é o DNAT da LAN).
 
 ## Instalação dos scripts (permanente)
 Pra o acesso ao stick (`:8888`) sobreviver a reboots **e** reprovisionamentos. Requer os [Pré-requisitos na UDM](#pré-requisitos-na-udm) (SSH + on-boot-script).
